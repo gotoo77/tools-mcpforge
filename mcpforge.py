@@ -28,30 +28,44 @@ def warn(msg: str):
 # ---------------------------------------------------------------------------
 # ANALYSEURS
 # ---------------------------------------------------------------------------
-
-def analyze_js_project(project: Path):
+# Ajout de la fonction générique scan_project et amélioration du scanner Express
+def scan_project(project_dir: Path):
     route_re = re.compile(r'\bapp\.(get|post|put|delete)\s*\(\s*["\']([^"\']+)["\']', re.I)
-    tools, resources = [], []
-    for file in project.rglob('*'):
-        if file.is_file() and file.suffix in ('.js', '.ts', '.mjs', '.cjs', '.tsx'):
-            try:
-                text = file.read_text(encoding='utf-8', errors='ignore')
-            except Exception:
-                continue
-            for m in route_re.finditer(text):
-                method, route = m.group(1).upper(), m.group(2)
-                safe_route = route.strip('/').replace('/', '_') or 'root'
+    tools = []
+    resources = []
+
+    for path in Path(project_dir).rglob('*.*'):
+        if any(excluded in str(path) for excluded in ["node_modules", ".venv", "venv", ".git", "__pycache__"]):
+            continue
+
+        try:
+            content = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        if path.suffix == ".js":
+            for match in route_re.finditer(content):
+                method, route = match.groups()
+                if not route.startswith("/"):
+                    continue
+                safe_name = route.strip('/').replace('/', '_') or 'root'
                 tools.append({
-                    'name': f"{method.lower()}_{safe_route}",
-                    'description': f"Route Express détectée: {method} {route} ({file.name})",
-                    'inputSchema': {'type': 'object', 'properties': {}}
+                    "name": f"{method.lower()}_{safe_name}",
+                    "description": f"Route Express détectée: {method.upper()} {route} ({path.name})",
+                    "inputSchema": {"type": "object", "properties": {}}
                 })
-    for candidate in ['config.json', 'config/app.config.json', 'logs/app.log', '.env']:
-        p = project / candidate
-        if p.exists():
-            resources.append({'uri': f'file://{p}', 'name': candidate, 'description': 'Fichier détecté'})
+
+        elif path.suffix in (".json", ".env", ".yaml", ".yml"):
+            resources.append({
+                "uri": f"file://{path.resolve()}",
+                "name": path.name,
+                "description": f"Ressource détectée ({path.suffix})"
+            })
+
     return {'tools': tools, 'resources': resources}
 
+def analyze_js_project(project: Path):
+    return scan_project(project)
 
 def analyze_py_project(project: Path):
     dec_re = re.compile(r'@(?:app|router)\.(get|post|put|delete)\s*\(\s*["\']([^"\']+)["\']', re.I)
@@ -107,36 +121,30 @@ def build_manifest(name, tools, resources):
 def write_server_stub(outdir: Path, name: str, tools, resources):
     mkdirp(outdir)
     code = [
-        f"# Auto-généré par MCPForge\nfrom fastmcp import MCPServer, tool, resource\n\napp = MCPServer(name=\"{name}\", version=\"0.1.0\")\n"
+        f"# Auto-généré par MCPForge\n"
+        f"from fastmcp import FastMCP\n\n"
+        f"mcp = FastMCP(name='{name}')\n"
     ]
+
+    seen = {}  # Dictionnaire pour traquer les doublons
+
     for t in tools:
-        # Nettoyer le nom Python : remplace tout caractère non alphanumérique par "_"
-        py_name = re.sub(r'[^0-9a-zA-Z_]', '_', t['name'])
+        # Nom Python valide
+        base_name = re.sub(r'[^0-9a-zA-Z_]', '_', t['name'])
+        # Gestion des doublons
+        count = seen.get(base_name, 0) + 1
+        seen[base_name] = count
+        py_name = f"{base_name}_{count}" if count > 1 else base_name
+
+        # Génération du code de tool
         code.append(
-            f"\n@tool(name=\"{t['name']}\", description=\"{t.get('description','')}\")\n"
-            f"def {py_name}(**kwargs):\n"
-            f"    return {{'ok': True, 'called': '{t['name']}', 'args': kwargs}}\n"
+            f"\n@mcp.tool(name=\"{t['name']}\", description=\"{t.get('description','Route détectée')}\")\n"
+            f"def {py_name}() -> dict:\n"
+            f"    \"\"\"Tool auto-généré depuis MCPForge\"\"\"\n"
+            f"    return {{'ok': True, 'called': '{t['name']}'}}\n"
         )
-    code.append("\n@resource.list\ndef list_resources():\n    return [\n")
-    for r in resources:
-        code.append(
-            f"        {{'uri': '{r['uri']}', 'name': '{r['name']}', 'description': '{r.get('description','')}' }},\n"
-        )
-    code.append(
-        "    ]\n\n@resource.read\n"
-        "def read_resource(uri: str):\n"
-        "    if uri.startswith('file://'):\n"
-        "        p = Path(uri.replace('file://',''))\n"
-        "        if p.exists():\n"
-        "            try:\n"
-        "                data = p.read_text(encoding='utf-8')\n"
-        "                return {'contents':[{'uri':uri,'mimeType':'text/plain','text':data}]}\n"
-        "            except Exception as e:\n"
-        "                return {'contents':[{'uri':uri,'mimeType':'text/plain','text':f'Erreur lecture: {e}'}]}\n"
-        "    return {'contents':[{'uri':uri,'mimeType':'text/plain'}]}\n\n"
-        "if __name__ == '__main__':\n"
-        "    app.run_stdio()\n"
-    )
+
+    code.append("\nif __name__ == '__main__':\n    mcp.run()\n")
     (outdir / 'server_stub_fastmcp.py').write_text(''.join(code), encoding='utf-8')
 
 

@@ -5,6 +5,7 @@
 import re
 import json
 import tempfile
+import re
 from pathlib import Path
 from jinja2 import Template
 
@@ -109,9 +110,11 @@ def write_server_stub(outdir: Path, name: str, tools, resources):
         f"# Auto-généré par MCPForge\nfrom fastmcp import MCPServer, tool, resource\n\napp = MCPServer(name=\"{name}\", version=\"0.1.0\")\n"
     ]
     for t in tools:
+        # Nettoyer le nom Python : remplace tout caractère non alphanumérique par "_"
+        py_name = re.sub(r'[^0-9a-zA-Z_]', '_', t['name'])
         code.append(
             f"\n@tool(name=\"{t['name']}\", description=\"{t.get('description','')}\")\n"
-            f"def {t['name']}(**kwargs):\n"
+            f"def {py_name}(**kwargs):\n"
             f"    return {{'ok': True, 'called': '{t['name']}', 'args': kwargs}}\n"
         )
     code.append("\n@resource.list\ndef list_resources():\n    return [\n")

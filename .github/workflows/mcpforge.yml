@@ -1,0 +1,52 @@
+[![MCPForge Build](https://github.com/gotoo77/tools-mcpforge/actions/workflows/mcpforge.yml/badge.svg)](https://github.com/gotoo77/tools-mcpforge/actions) [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[![MCPForge Build](https://github.com/gotoo77/tools-mcpforge/actions/workflows/mcpforge.yml/badge.svg)](https://github.com/gotoo77/tools-mcpforge/actions)
+
+name: 🧪 Test & Publish MCPForge
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧰 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install jinja2 fastmcp
+
+      - name: 🧪 Run MCPForge selftests
+        run: |
+          python mcpforge.py --selftest
+
+      - name: 🧩 Generate sample output
+        run: |
+          mkdir -p artifacts
+          python mcpforge.py ./ --out artifacts
+
+      - name: 📤 Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpforge-artifacts
+          path: |
+            artifacts/mcp-manifest.json
+            artifacts/server_stub_fastmcp.py
+            artifacts/report/index.html
+
+      - name: ✅ Summary
+        run: |
+          echo "MCPForge tests passed ✅"
+
